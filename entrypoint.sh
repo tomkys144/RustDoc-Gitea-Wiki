@@ -12,8 +12,8 @@ MAX_DEFINITION_LINES="${MAX_DEFINITION_LINES:-50}"
 # Convert excluded paths to array
 IFS=',' read -ra EXCLUDED_ARRAY <<< "$EXCLUDED_PATHS"
 
-# Create Home.md
-echo "# ${GITHUB_REPOSITORY#*/} Documentation" > "${WIKI_PATH}/Home.md"
+# Create Home.md (Updated to use GITEA_REPOSITORY)
+echo "# ${GITEA_REPOSITORY#*/} Documentation" > "${WIKI_PATH}/Home.md"
 echo "" >> "${WIKI_PATH}/Home.md"
 echo "This wiki contains automatically generated documentation from the Rust codebase." >> "${WIKI_PATH}/Home.md"
 echo "" >> "${WIKI_PATH}/Home.md"
@@ -102,8 +102,6 @@ find "$SOURCE_PATH" -name "*.rs" -type f | while read -r file; do
       
       # Extract private structs
       grep -n "^[[:space:]]*struct[[:space:]]" "$file" | grep -v "pub" 2>/dev/null | sed -E 's/^([0-9]+):.*(struct[[:space:]]+[a-zA-Z0-9_]+).*/\1:\2/' || true
-      
-      # And so on for other item types...
     fi
     
   } | sort -n > "$output_file.items"
@@ -241,24 +239,16 @@ find "$SOURCE_PATH" -name "*.rs" -type f | while read -r file; do
       # Determine how to extract based on item type
       case "$item_type" in
         "mod")
-          # For module, check if it has a body or just a semicolon
           if ! [[ "$def_line" =~ \;$ ]]; then
-            # It has a body, extract the content
             next_line_num=$((line_num + 1))
-            # Continue until we find matching closing brace
             brace_count=1
-            while [ $brace_count -gt 0 ] && [ $next_line_num -le $(wc -l < "$file") ]; do
+            while [ $brace_count -gt 0 ] && [$next_line_num -le $(wc -l < "$file") ]; do
               next_line=$(sed -n "${next_line_num}p" "$file")
               echo "$next_line" >> "$output_file"
-              
-              # Update brace count
               open_braces=$(grep -o "{" <<< "$next_line" | wc -l)
               close_braces=$(grep -o "}" <<< "$next_line" | wc -l)
               brace_count=$((brace_count + open_braces - close_braces))
-              
               next_line_num=$((next_line_num + 1))
-              
-              # Limit to reasonable size
               if [ $((next_line_num - line_num)) -gt "$MAX_DEFINITION_LINES" ]; then
                 echo "    // ... additional module content" >> "$output_file"
                 echo "}" >> "$output_file"
@@ -268,26 +258,17 @@ find "$SOURCE_PATH" -name "*.rs" -type f | while read -r file; do
           fi
           ;;
         "struct"|"enum"|"trait")
-          # These typically have a body with braces
           if ! [[ "$def_line" =~ \;$ ]]; then
-            # Find the closing brace
             next_line_num=$((line_num + 1))
-            # Continue until we find matching closing brace
             brace_count=$(grep -o "{" <<< "$def_line" | wc -l)
             brace_count=$((brace_count - $(grep -o "}" <<< "$def_line" | wc -l)))
-            
-            while [ $brace_count -gt 0 ] && [ $next_line_num -le $(wc -l < "$file") ]; do
+            while [ $brace_count -gt 0 ] && [$next_line_num -le $(wc -l < "$file") ]; do
               next_line=$(sed -n "${next_line_num}p" "$file")
               echo "$next_line" >> "$output_file"
-              
-              # Update brace count
               open_braces=$(grep -o "{" <<< "$next_line" | wc -l)
               close_braces=$(grep -o "}" <<< "$next_line" | wc -l)
               brace_count=$((brace_count + open_braces - close_braces))
-              
               next_line_num=$((next_line_num + 1))
-              
-              # Limit to reasonable size
               if [ $((next_line_num - line_num)) -gt "$MAX_DEFINITION_LINES" ]; then
                 echo "    // ... additional implementation" >> "$output_file"
                 echo "}" >> "$output_file"
@@ -297,33 +278,22 @@ find "$SOURCE_PATH" -name "*.rs" -type f | while read -r file; do
           fi
           ;;
         "fn"|"async fn")
-          # Functions can end with a semicolon or have a body
           if ! [[ "$def_line" =~ \;$ ]]; then
-            # Find the closing brace if it has a body
             next_line_num=$((line_num + 1))
             brace_found=false
-            
-            # If the function signature spans multiple lines
             while [ $next_line_num -le $(wc -l < "$file") ]; do
               next_line=$(sed -n "${next_line_num}p" "$file")
               echo "$next_line" >> "$output_file"
-              
-              # If we found a semicolon, we're done
               if [[ "$next_line" =~ \;$ ]]; then
                 break
               fi
-              
-              # If we found an opening brace, need to find matching closing brace
               if [[ "$next_line" =~ \{$ ]]; then
                 brace_found=true
                 echo "    // ... function body" >> "$output_file"
                 echo "}" >> "$output_file"
                 break
               fi
-              
               next_line_num=$((next_line_num + 1))
-              
-              # Limit to reasonable size
               if [ $((next_line_num - line_num)) -gt 20 ]; then
                 if ! [[ "$next_line" =~ [\;\{] ]]; then
                   echo "    // ... function definition continues" >> "$output_file"
@@ -331,8 +301,6 @@ find "$SOURCE_PATH" -name "*.rs" -type f | while read -r file; do
                 break
               fi
             done
-            
-            # If we didn't find either a semicolon or a brace, make sure to terminate the function
             if [ "$brace_found" = false ]; then
               if ! [[ "$next_line" =~ \;$ ]]; then
                 echo "    // ... function body" >> "$output_file"
@@ -342,22 +310,15 @@ find "$SOURCE_PATH" -name "*.rs" -type f | while read -r file; do
           fi
           ;;
         "type"|"const")
-          # These typically end with a semicolon
           if ! [[ "$def_line" =~ \;$ ]]; then
             next_line_num=$((line_num + 1))
-            
-            # Continue until semicolon
             while [ $next_line_num -le $(wc -l < "$file") ]; do
               next_line=$(sed -n "${next_line_num}p" "$file")
               echo "$next_line" >> "$output_file"
-              
               if [[ "$next_line" =~ \;$ ]]; then
                 break
               fi
-              
               next_line_num=$((next_line_num + 1))
-              
-              # Limit to reasonable size
               if [ $((next_line_num - line_num)) -gt 10 ]; then
                 if ! [[ "$next_line" =~ \;$ ]]; then
                   echo "    // ... definition continues" >> "$output_file"
@@ -379,50 +340,37 @@ find "$SOURCE_PATH" -name "*.rs" -type f | while read -r file; do
         echo "#### Documentation" >> "$output_file"
         echo "" >> "$output_file"
         
-        # Process the documentation lines for formatting
         current_section=""
         in_section=false
         
         for doc_line in "${doc_lines[@]}"; do
-          # Check for section headers
           if [[ "$doc_line" =~ ^#[[:space:]] ]]; then
-            # If we were in a section, output it first
             if [ "$in_section" = true ] && [ -n "$current_section" ]; then
               echo "$current_section" >> "$output_file"
               echo "" >> "$output_file"
               current_section=""
             fi
-            
-            # Output header with extra # for markdown heading level
             echo "##### ${doc_line:2}" >> "$output_file"
             echo "" >> "$output_file"
             in_section=false
-          # Handle list items
           elif [[ "$doc_line" =~ ^\*[[:space:]] ]]; then
-            # If we were in a paragraph, output it first
             if [ "$in_section" = true ] && [ -n "$current_section" ]; then
               echo "$current_section" >> "$output_file"
               echo "" >> "$output_file"
               current_section=""
               in_section=false
             fi
-            
-            # Output list item directly
             echo "$doc_line" >> "$output_file"
-          # Regular paragraph text
           else
             if [ "$in_section" = true ]; then
-              # If continuing a paragraph, add a space instead of newline
               current_section="${current_section} ${doc_line}"
             else
-              # Starting a new paragraph
               current_section="${doc_line}"
               in_section=true
             fi
           fi
         done
         
-        # Output any remaining section
         if [ "$in_section" = true ] && [ -n "$current_section" ]; then
           echo "$current_section" >> "$output_file"
           echo "" >> "$output_file"
@@ -438,14 +386,18 @@ find "$SOURCE_PATH" -name "*.rs" -type f | while read -r file; do
   echo "* [$unique_name](${unique_name})" >> "${WIKI_PATH}/Home.md"
 done
 
-# Setup Git for Wiki Push
-if [ -n "$GITHUB_TOKEN" ]; then
-  git config --global user.email "actions@github.com"
-  git config --global user.name "GitHub Actions"
+# Setup Git for Gitea Wiki Push
+if [ -n "$GITEA_TOKEN" ]; then
+  git config --global user.email "actions@gitea.local"
+  git config --global user.name "Gitea Actions Bot"
 
-  # Clone Wiki Repository
+  # Clone Wiki Repository natively from Gitea
   echo "Cloning wiki repository..."
-  git clone "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git" wiki-repo
+  # Extract protocol and domain to inject the token
+  PROTOCOL="$(echo $GITEA_SERVER_URL | grep :// | sed -e's,^\(.*://\).*,\1,g')"
+  URL_WITHOUT_PROTOCOL="${GITEA_SERVER_URL/${PROTOCOL}/}"
+  
+  git clone "${PROTOCOL}oauth2:${GITEA_TOKEN}@${URL_WITHOUT_PROTOCOL}/${GITEA_REPOSITORY}.wiki.git" wiki-repo
 
   # Copy content to wiki
   echo "Copying content to wiki..."
@@ -458,11 +410,12 @@ if [ -n "$GITHUB_TOKEN" ]; then
   if git diff --staged --quiet; then
     echo "No changes to commit"
   else
-    git commit -m "${COMMIT_MESSAGE} (${GITHUB_SHA:0:7})"
-    git push
+    # Append the short commit hash of the trigger commit to the message
+    git commit -m "${COMMIT_MESSAGE} (${GITEA_SHA:0:7})"
+    git push origin master
     echo "Wiki successfully updated!"
   fi
 else
-  echo "GITHUB_TOKEN not provided, skipping wiki push"
+  echo "GITEA_TOKEN not provided, skipping wiki push"
   echo "Generated documentation is available in the ${WIKI_PATH} directory"
 fi

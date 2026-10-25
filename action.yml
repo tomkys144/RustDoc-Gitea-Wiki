@@ -1,15 +1,15 @@
 name: 'Rust Docs to Wiki'
-description: 'Automatically extract Rust documentation and publish it to GitHub Wiki'
-author: 'Your Name'
+description: 'Automatically extract Rust documentation and publish it to Gitea Wiki'
+author: 'tomkys144'
 branding:
   icon: 'book'
   color: 'orange'
 
 inputs:
   token:
-    description: 'GitHub token for wiki access (typically secrets.GITHUB_TOKEN)'
+    description: 'Gitea token for wiki access'
     required: true
-    default: ${{ github.token }}
+    default: ${{ gitea.token }}
   source_path:
     description: 'Directory containing Rust source files'
     required: false
@@ -41,12 +41,6 @@ runs:
     - name: Create wiki directory
       shell: bash
       run: mkdir -p ${{ inputs.wiki_path }}
-    - name: Debug action directory
-      shell: bash
-      run: |
-        echo "GITHUB_ACTION_PATH: $GITHUB_ACTION_PATH"
-        ls -la $GITHUB_ACTION_PATH
-        find $GITHUB_ACTION_PATH -type f -name "*.sh"
     - name: Fix executable permissions
       shell: bash
       run: chmod +x $GITHUB_ACTION_PATH/entrypoint.sh
@@ -60,6 +54,7 @@ runs:
         EXCLUDED_PATHS: ${{ inputs.excluded_paths }}
         EXTRACT_PRIVATE: ${{ inputs.extract_private }}
         MAX_DEFINITION_LINES: ${{ inputs.max_definition_lines }}
-        GITHUB_TOKEN: ${{ inputs.token }}
-        GITHUB_REPOSITORY: ${{ github.repository }}
-        GITHUB_SHA: ${{ github.sha }}
+        GITEA_TOKEN: ${{ inputs.token }}
+        GITEA_REPOSITORY: ${{ gitea.repository }}
+        GITEA_SERVER_URL: ${{ gitea.server_url }}
+        GITEA_SHA: ${{ gitea.sha }}
