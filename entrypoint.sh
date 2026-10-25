@@ -34,25 +34,20 @@ should_exclude() {
 }
 
 # Universal source file discovery:
-# If SOURCE_PATH is explicitly set and exists, use it.
-# Otherwise, search for all Cargo.toml files to find workspace members, or fallback to searching the current directory.
 TARGET_DIRS=()
 if [ -n "$SOURCE_PATH" ] && [ -d "$SOURCE_PATH" ]; then
   TARGET_DIRS=("$SOURCE_PATH")
 elif [ -f "Cargo.toml" ]; then
-  # Scan for sub-crates or workspace member directories containing a src folder
   while IFS= read -r dir; do
     if [ -d "$dir/src" ]; then
       TARGET_DIRS+=("$dir/src")
     fi
   done < <(find . -name "Cargo.toml" -not -path "./Cargo.toml" -exec dirname {} \;)
   
-  # Also include the root src directory if it exists
   if [ -d "src" ]; then
     TARGET_DIRS+=("src")
   fi
 else
-  # Fallback to current directory if no Cargo.toml exists
   TARGET_DIRS=(".")
 fi
 
@@ -71,20 +66,18 @@ for search_dir in "${TARGET_DIRS[@]}"; do
     base_name=$(basename "$file" .rs)
     dir_path=$(dirname "$file")
     
-    # Generate a unique markdown filename based on file path to prevent naming collisions across workspaces
     unique_name=$(echo "${dir_path//\//_}_${base_name}" | sed 's/^\.__//' | sed 's/^__//')
     output_file="${WIKI_PATH}/${unique_name}.md"
     
     echo "Processing $file into $output_file"
     
-    # Create file header
     echo "# $base_name ($dir_path)" > "$output_file"
     echo "" >> "$output_file"
     echo "Path: \`$file\`" >> "$output_file"
     echo "" >> "$output_file"
     
     # Extract module-level documentation (//! comments)
-    grep -n "^[[:space:]]*//!" "$file" 2>/dev/null \vert{} sed 's/^[0-9]*://g' \vert{} sed 's/\/\/![[:space:]]*//' > "$output_file.module_docs" || true
+    grep -n "^[[:space:]]*//!" "$file" 2>/dev/null | sed 's/^[0-9]*://g' | sed 's/\/\/![[:space:]]*//' > "$output_file.module_docs" || true
     if [ -s "$output_file.module_docs" ]; then
       echo "## Module Documentation" >> "$output_file"
       echo "" >> "$output_file"
@@ -93,7 +86,6 @@ for search_dir in "${TARGET_DIRS[@]}"; do
     fi
     rm -f "$output_file.module_docs"
     
-    # Build Table of Contents header
     echo "## Table of Contents" >> "$output_file"
     echo "" >> "$output_file"
     
@@ -114,7 +106,6 @@ for search_dir in "${TARGET_DIRS[@]}"; do
       fi
     } | sort -n > "$output_file.items"
     
-    # Write TOC entries
     while read -r line_info; do
       item_line=$(echo "$line_info" | cut -d: -f2-)
       if [[ "$item_line" =~ pub[[:space:]]+([a-zA-Z_]+)[[:space:]]+([a-zA-Z0-9_]+) ]]; then
@@ -128,7 +119,6 @@ for search_dir in "${TARGET_DIRS[@]}"; do
     echo "## Public Items" >> "$output_file"
     echo "" >> "$output_file"
     
-    # Process items to append definitions and doc comments
     while read -r line_info; do
       line_num=$(echo "$line_info" | cut -d: -f1)
       item_line=$(echo "$line_info" | cut -d: -f2-)
@@ -144,7 +134,6 @@ for search_dir in "${TARGET_DIRS[@]}"; do
         echo "### $item_type $item_name" >> "$output_file"
         echo "" >> "$output_file"
         
-        # Extract preceding doc comments (///)
         doc_start=$((line_num - 1))
         doc_lines=()
         while [ $doc_start -gt 0 ]; do
@@ -153,7 +142,7 @@ for search_dir in "${TARGET_DIRS[@]}"; do
             comment=$(echo "$doc_line" | sed 's/^[[:space:]]*\/\/\/[[:space:]]*//')
             doc_lines=("$comment" "${doc_lines[@]}")
             doc_start=$((doc_start - 1))
-          elif [[ "$doc_line" =~ ^[[:space:]]*$ ]] \vert{}\vert{} [[ "$doc_line" =~ ^[[:space:]]*#\[ ]]; then
+          elif [[ "$doc_line" =~ ^[[:space:]]*$ ]] || [[ "$doc_line" =~ ^[[:space:]]*#\[ ]]; then
             doc_start=$((doc_start - 1))
           else
             break
@@ -178,3 +167,35 @@ for search_dir in "${TARGET_DIRS[@]}"; do
         fi
       fi
     done < "$output_file.items"
+    
+    rm -f "$output_file.items"
+    
+    echo "* [$unique_name](${unique_name})" >> "${WIKI_PATH}/Home.md"
+  done
+done
+
+# Setup Git and push to Gitea Wiki repository if token is provided
+if [ -n "$GITEA_TOKEN" ]; then
+  git config --global user.email "actions@gitea.local"
+  git config --global user.name "Gitea Actions Bot"
+
+  echo "Cloning wiki repository..."
+  PROTOCOL="$(echo $GITEA_SERVER_URL | grep :// | sed -e's,^\(.*://\).*,\1,g')"
+  URL_WITHOUT_PROTOCOL="${GITEA_SERVER_URL/${PROTOCOL}/}"
+  
+  git clone "${PROTOCOL}oauth2:${GITEA_TOKEN}@${URL_WITHOUT_PROTOCOL}/${GITEA_REPOSITORY}.wiki.git" wiki-repo
+
+  cp -r ${WIKI_PATH}/* wiki-repo/
+  cd wiki-repo
+  git add .
+
+  if git diff --staged --quiet; then
+    echo "No changes to commit"
+  else
+    git commit -m "${COMMIT_MESSAGE} (${GITEA_SHA:0:7})"
+    git push origin master
+    echo "Wiki successfully updated!"
+  fi
+else
+  echo "GITEA_TOKEN not provided, skipping wiki push. Docs generated locally."
+fi
